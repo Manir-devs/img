@@ -33,24 +33,10 @@ All in one lightweight Python-based toolkit.
 
 ---
 
-## 🖼 Logo Showcase
-
-> Place your logo inside `assets/logo.png`
-
-```bash
-project-root/
- ├── assets/
- │    └── logo.png
- ├── tool.py
- └── README.md
-```
-
----
-
 # 📥 Download Latest Release
 
 <p align="center">
-  <a href="https://github.com/YOUR_USERNAME/YOUR_REPO/releases/latest">
+  <a href="https://github.com/Manir-devs/img/releases/latest">
     <img src="https://img.shields.io/badge/⬇ Download Latest Release-black?style=for-the-badge"/>
   </a>
 </p>
