@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+import sys
+import os
+import time
+import tkinter as tk
+from tkinter import Canvas
+from PIL import Image, ImageTk
+
+VERSION = "1.0"
+
+try:
+    from colorama import Fore, Style, init
+    init(autoreset=True)
+    HAS_COLOR = True
+except ImportError:
+    HAS_COLOR = False
+
+try:
+    from svglib.svglib import svg2rlg
+    from reportlab.graphics import renderPM
+except ImportError:
+    pass
+
+def progress_bar(task_name, duration=1.0):
+    width = 40
+    for i in range(width + 1):
+        percent = (i / width) * 100
+        bar = "█" * i + "░" * (width - i)
+        if HAS_COLOR:
+            print(f"\r{Fore.CYAN}{task_name}: {Fore.MAGENTA}|{bar}| {Fore.YELLOW}{percent:.1f}%", end="")
+        else:
+            print(f"\r{task_name}: |{bar}| {percent:.1f}%", end="")
+        time.sleep(duration / width)
+    print("")
+
+def show_help():
+    if HAS_COLOR:
+        print(f"\n{Fore.MAGENTA}╔══════════════════════════════════════════════════════════╗")
+        print(f"{Fore.MAGENTA}║{Fore.YELLOW}              MANIR'S IMAGE TOOL v{VERSION}             {Fore.MAGENTA}║")
+        print(f"{Fore.MAGENTA}╚══════════════════════════════════════════════════════════╝")
+        print(f"\n{Fore.CYAN}COMMANDS:{Style.RESET_ALL}")
+        print(f"  img open <path>")
+        print(f"  img make <unit> <val> <path>")
+        print(f"  img ext <input> <output> <optional_ext>")
+        print(f"  img crop <path>")
+        print(f"\n{Fore.GREEN}EXAMPLES:{Style.RESET_ALL}")
+        print(f"  img make kb 500 photo.jpg")
+        print(f"  img ext file.gif MyFolder png")
+        print(f"  img ext MyFolder output.gif")
+        print(f"  img ext file.pdf output.gif")
+    else:
+        print(f"Manir's Tool v{VERSION}")
+
+def open_gui(path):
+    if not os.path.exists(path): return
+    root = tk.Tk()
+    root.title(f"View: {path}")
+    img = Image.open(path)
+    img.thumbnail((800, 600))
+    photo = ImageTk.PhotoImage(img)
+    tk.Label(root, image=photo).pack()
+    root.mainloop()
+
+def make_exact_size(unit, val, path):
+    if not os.path.exists(path): return
+    units = {'bit': 0.125, 'byte': 1, 'kb': 1024, 'mb': 1024**2, 'gb': 1024**3}
+    target_bytes = int(float(val) * units.get(unit.lower(), 1))
+    output_path = f"sized_{os.path.basename(path)}"
+    
+    progress_bar("Adjusting Resolution")
+    img = Image.open(path)
+    orig_w, orig_h = img.size
+    
+    current_quality = 95
+    while current_quality > 5:
+        img.save(output_path, "JPEG", quality=current_quality)
+        if os.path.getsize(output_path) <= target_bytes:
+            break
+        current_quality -= 5
+    
+    if os.path.getsize(output_path) > target_bytes:
+        ratio = 0.9
+        while os.path.getsize(output_path) > target_bytes and ratio > 0.1:
+            new_size = (int(orig_w * ratio), int(orig_h * ratio))
+            resized_img = img.resize(new_size, Image.Resampling.LANCZOS)
+            resized_img.save(output_path, "JPEG", quality=current_quality)
+            ratio -= 0.1
+
+    current_size = os.path.getsize(output_path)
+    if current_size < target_bytes:
+        with open(output_path, "ab") as f:
+            f.write(b'\0' * (target_bytes - current_size))
+    elif current_size > target_bytes:
+        with open(output_path, "ab") as f:
+            f.truncate(target_bytes)
+            
+    print(f"Final Size: {os.path.getsize(output_path)} bytes")
+
+def convert_ext(in_p, out_p, extra_ext=None):
+    try:
+        progress_bar("Converting")
+        if in_p.lower().endswith('.gif') and not out_p.lower().endswith('.pdf') and not out_p.lower().endswith('.gif'):
+            img = Image.open(in_p)
+            os.makedirs(out_p, exist_ok=True)
+            fmt = extra_ext if extra_ext else "png"
+            for i in range(img.n_frames):
+                img.seek(i)
+                img.save(os.path.join(out_p, f"{i}.{fmt}"))
+        
+        elif (os.path.isdir(in_p) or in_p.lower().endswith('.pdf')) and out_p.lower().endswith('.gif'):
+            frames = []
+            if os.path.isdir(in_p):
+                files = [os.path.join(in_p, f) for f in os.listdir(in_p) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))]
+                files.sort(key=lambda x: (os.path.basename(x).split('.')[0].isdigit(), os.path.basename(x), os.path.getctime(x)))
+                for f in files:
+                    frames.append(Image.open(f).convert("RGBA"))
+            else:
+                img = Image.open(in_p)
+                for i in range(img.n_frames):
+                    img.seek(i)
+                    frames.append(img.convert("RGBA"))
+            frames[0].save(out_p, save_all=True, append_images=frames[1:], duration=100, loop=0)
+
+        elif out_p.lower().endswith('.svg'):
+            print("Error: Direct JPG to SVG is not supported via raster. Use tracing tools.")
+        
+        elif in_p.lower().endswith('.svg'):
+            drawing = svg2rlg(in_p)
+            renderPM.drawToFile(drawing, out_p, fmt=out_p.split('.')[-1].upper())
+        
+        else:
+            img = Image.open(in_p)
+            if out_p.lower().endswith(('.jpg', '.jpeg')) and img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(out_p)
+        print("Success")
+    except Exception as e:
+        print(f"Error: {e}")
+
+class CropTool:
+    def __init__(self, path):
+        if not os.path.exists(path): return
+        self.root = tk.Tk()
+        self.img = Image.open(path)
+        self.tk_img = ImageTk.PhotoImage(self.img)
+        self.canvas = Canvas(self.root, width=self.img.width, height=self.img.height, cursor="crosshair")
+        self.canvas.pack()
+        self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
+        self.rect = None
+        self.canvas.bind("<ButtonPress-1>", self.on_press)
+        self.canvas.bind("<B1-Motion>", self.on_move)
+        self.canvas.bind("<ButtonRelease-1>", self.on_release)
+        self.root.mainloop()
+
+    def on_press(self, event):
+        self.start_x, self.start_y = event.x, event.y
+        self.rect = self.canvas.create_rectangle(self.start_x, self.start_y, 1, 1, outline='red', width=2)
+
+    def on_move(self, event):
+        self.canvas.coords(self.rect, self.start_x, self.start_y, event.x, event.y)
+
+    def on_release(self, event):
+        x1, y1 = min(self.start_x, event.x), min(self.start_y, event.y)
+        x2, y2 = max(self.start_x, event.x), max(self.start_y, event.y)
+        self.img.crop((x1, y1, x2, y2)).save(f"cropped_{int(time.time())}.png")
+        self.root.destroy()
+
+def main():
+    if len(sys.argv) < 2:
+        show_help()
+        return
+    cmd = sys.argv[1].lower()
+    if cmd in ["version", "--version", "-v"]:
+        print(f"Version {VERSION}")
+    elif cmd == "open" and len(sys.argv) == 3: open_gui(sys.argv[2])
+    elif cmd == "make" and len(sys.argv) == 5: make_exact_size(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif cmd == "ext" and len(sys.argv) >= 4:
+        extra = sys.argv[4] if len(sys.argv) == 5 else None
+        convert_ext(sys.argv[2], sys.argv[3], extra)
+    elif cmd == "crop" and len(sys.argv) == 3: CropTool(sys.argv[2])
+    else: show_help()
+
+if __name__ == "__main__":
+    main()
